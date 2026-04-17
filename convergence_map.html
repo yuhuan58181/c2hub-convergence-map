@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C2 Hub — Convergence Map</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0a1a;
+  --surface:   #0f0f2a;
+  --surface2:  #161630;
+  --border:    #252550;
+  --text:      #e2e8f0;
+  --text-dim:  #94a3b8;
+  --text-mute: #475569;
+  --accent:    #6366f1;
+  --accent2:   #818cf8;
+  --sidebar-w: 240px;
+  --panel-w:   320px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 54px 1fr 100px;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-areas:
+    "header  header"
+    "sidebar main"
+    "footer  footer";
+  overflow: hidden;
+}
+
+/* ── Header ── */
+#header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+  z-index: 10;
+}
+#header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--accent2);
+  white-space: nowrap;
+}
+#header .subtitle {
+  font-size: 12px;
+  color: var(--text-mute);
+  flex: 1;
+}
+#toggle-hub {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+  white-space: nowrap;
+}
+#toggle-hub:hover, #toggle-hub.active {
+  background: var(--accent);
+  color: #fff;
+}
+#hub-count {
+  font-size: 11px;
+  color: var(--text-mute);
+  margin-left: 4px;
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  grid-area: sidebar;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-section {
+  padding: 14px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-section h3 {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+#hub-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 0;
+}
+.hub-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background .15s;
+  border-radius: 0;
+}
+.hub-item:hover { background: var(--surface2); }
+.hub-item.selected { background: rgba(99,102,241,.15); }
+.hub-rank {
+  font-size: 10px;
+  color: var(--text-mute);
+  width: 14px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.hub-ticker {
+  font-size: 12px;
+  font-weight: 700;
+  width: 38px;
+  flex-shrink: 0;
+}
+.hub-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hub-bar-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hub-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: opacity .2s;
+}
+.hub-meta {
+  font-size: 10px;
+  color: var(--text-mute);
+  display: flex;
+  justify-content: space-between;
+}
+.hub-cc {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent2);
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Legend */
+.legend-wrap {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.legend-wrap h3 {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color .15s;
+}
+.legend-item:hover { color: var(--text); }
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Main SVG ── */
+#main {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+}
+#chart-svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Tooltip */
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: rgba(15,15,42,.96);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-size: 12px;
+  max-width: 220px;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity .15s;
+  backdrop-filter: blur(8px);
+}
+#tooltip .tt-company { font-weight: 700; font-size: 13px; color: var(--text); margin-bottom: 2px; }
+#tooltip .tt-segment { color: var(--text-dim); margin-bottom: 6px; }
+#tooltip .tt-cluster { font-size: 11px; margin-bottom: 3px; }
+#tooltip .tt-cluster span { border-radius: 4px; padding: 1px 6px; font-size: 10px; }
+#tooltip .tt-rev { font-size: 11px; color: var(--text-mute); }
+
+/* Detail Panel */
+#detail-panel {
+  position: absolute;
+  top: 0; right: 0;
+  width: var(--panel-w);
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto;
+  z-index: 20;
+  padding: 20px;
+}
+#detail-panel.open { transform: translateX(0); }
+#detail-close {
+  position: absolute;
+  top: 12px; right: 14px;
+  background: none; border: none;
+  color: var(--text-mute); cursor: pointer;
+  font-size: 18px; line-height: 1;
+}
+#detail-close:hover { color: var(--text); }
+.dp-company { font-size: 11px; color: var(--text-mute); margin-bottom: 2px; }
+.dp-segment  { font-size: 18px; font-weight: 700; line-height: 1.3; margin-bottom: 10px; }
+.dp-cluster-badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-size: 11px;
+  margin-bottom: 14px;
+  color: #0a0a1a;
+  font-weight: 600;
+}
+.dp-rev { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+.dp-section { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-mute); margin-bottom: 6px; font-weight: 600; }
+.dp-desc { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 18px; }
+.dp-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 18px; }
+.dp-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.dp-divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+/* ── Footer ── */
+#footer {
+  grid-area: footer;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+}
+#footer p {
+  font-size: 11.5px;
+  color: var(--text-mute);
+  line-height: 1.7;
+  max-width: 900px;
+}
+#footer p strong { color: var(--text-dim); font-weight: 600; }
+
+/* SVG elements */
+.cluster-hull { stroke-width: 1.5; }
+.company-link { fill: none; stroke-dasharray: 5,4; stroke-width: 1.2; opacity: .55; }
+.segment-dot { cursor: pointer; transition: opacity .2s; }
+.segment-dot:hover { stroke-width: 2.5 !important; }
+.cluster-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  pointer-events: none;
+  text-anchor: middle;
+  fill: #cbd5e1;
+  opacity: .75;
+}
+.company-label {
+  font-size: 10px;
+  font-weight: 700;
+  fill: #fff;
+  opacity: .9;
+  pointer-events: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>◈ C2 Hub — Convergence Map</h1>
+  <span class="subtitle">12 Companies · 44 Business Segments · 6 Clusters · SEC 10-K Based</span>
+  <button id="toggle-hub">★ Show Hub Nodes Only</button>
+</div>
+
+<aside id="sidebar">
+  <div class="sidebar-section">
+    <h3>Hub Node Rankings</h3>
+  </div>
+  <div id="hub-list"></div>
+  <div class="legend-wrap">
+    <h3>Clusters</h3>
+    <div id="legend"></div>
+  </div>
+</aside>
+
+<main id="main">
+  <svg id="chart-svg"></svg>
+  <div id="detail-panel">
+    <button id="detail-close">×</button>
+    <div id="detail-content"></div>
+  </div>
+</main>
+
+<footer id="footer">
+  <p>
+    <strong>方法論：</strong>
+    本圖使用 SEC 10-K 財報的業務描述（Item 1），經 LLM 萃取為結構化業務板塊後，透過
+    <strong>Sentence Transformers（all-MiniLM-L6-v2）</strong> 產生語意嵌入，
+    再以 <strong>UMAP</strong> 降維至 2D、<strong>HDBSCAN</strong> 聚類分析產生。
+    橫跨多個聚類的公司被識別為 <strong>Hub Node</strong>，代表其業務具備跨產業聚合特性。
+    Convergence Centrality = 跨聚類數 × (非 Noise 板塊數 / 總板塊數)。
+  </p>
+</footer>
+
+<div id="tooltip"></div>
+
+<script>
+// ── Embedded data ─────────────────────────────────────────────────────────────
+const SEGMENTS = [
+  {"company":"NVDA","company_name":"NVIDIA Corporation","segment_name":"Data Center","description":"GPU accelerators and networking solutions for AI training, inference, and high-performance computing in cloud and enterprise data centers","revenue_contribution":"78%","industry_tags":["AI infrastructure","cloud computing","high-performance computing","data center hardware"],"key_technologies":["GPU","CUDA","NVLink","InfiniBand","Tensor Core"],"customer_segments":["cloud hyperscalers","enterprise AI","research institutions"],"x":0.756586,"y":8.686422,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"NVDA","company_name":"NVIDIA Corporation","segment_name":"Gaming","description":"GPUs and software platforms for PC gaming, game streaming services, and content creation","revenue_contribution":"14%","industry_tags":["gaming hardware","consumer electronics","content creation"],"key_technologies":["GPU","ray tracing","DLSS","GeForce"],"customer_segments":["gamers","content creators","game developers"],"x":1.652511,"y":7.865221,"cluster_id":4,"cluster_name":"Consumer Computing & Gaming"},
+  {"company":"NVDA","company_name":"NVIDIA Corporation","segment_name":"Professional Visualization","description":"GPU solutions for professional design, simulation, and digital twin applications across industries","revenue_contribution":"3%","industry_tags":["industrial simulation","digital twin","professional graphics"],"key_technologies":["RTX","Omniverse","GPU rendering"],"customer_segments":["architects","engineers","designers","manufacturers"],"x":1.071176,"y":7.937968,"cluster_id":4,"cluster_name":"Consumer Computing & Gaming"},
+  {"company":"NVDA","company_name":"NVIDIA Corporation","segment_name":"Automotive","description":"AI computing platforms for autonomous vehicles, cockpit intelligence, and EV powertrain simulation","revenue_contribution":"5%","industry_tags":["autonomous driving","automotive AI","electric vehicles"],"key_technologies":["DRIVE","Orin SoC","simulation platform"],"customer_segments":["automakers","robotaxi operators","EV manufacturers"],"x":0.941864,"y":9.591414,"cluster_id":-1,"cluster_name":"Noise"},
+  {"company":"AMZN","company_name":"Amazon.com Inc.","segment_name":"AWS Cloud Services","description":"On-demand cloud computing platforms, storage, databases, machine learning services, and serverless infrastructure for businesses globally","revenue_contribution":"17%","industry_tags":["cloud computing","AI infrastructure","enterprise software"],"key_technologies":["cloud infrastructure","serverless computing","machine learning services","Graviton chips"],"customer_segments":["enterprises","startups","government agencies"],"x":0.586416,"y":10.050394,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"AMZN","company_name":"Amazon.com Inc.","segment_name":"E-Commerce Marketplace","description":"Online retail platform connecting consumers with products through first-party sales and third-party marketplace, including fulfillment services","revenue_contribution":"55%","industry_tags":["e-commerce","retail","marketplace platform"],"key_technologies":["recommendation algorithms","logistics automation","warehouse robotics"],"customer_segments":["consumers","third-party sellers","brands"],"x":2.08146,"y":11.647494,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"AMZN","company_name":"Amazon.com Inc.","segment_name":"Digital Advertising","description":"Sponsored product listings, display advertising, and video advertising across Amazon properties and third-party sites","revenue_contribution":"8%","industry_tags":["digital advertising","ad technology","media"],"key_technologies":["programmatic advertising","audience targeting","ad attribution"],"customer_segments":["advertisers","brands","agencies"],"x":3.184848,"y":7.459493,"cluster_id":1,"cluster_name":"Digital Media & Advertising"},
+  {"company":"AMZN","company_name":"Amazon.com Inc.","segment_name":"Logistics & Fulfillment","description":"End-to-end logistics network including warehouses, delivery fleet, last-mile delivery, and third-party logistics services","revenue_contribution":"15%","industry_tags":["logistics","supply chain","last-mile delivery"],"key_technologies":["warehouse robotics","route optimization","drone delivery"],"customer_segments":["Amazon sellers","third-party shippers","consumers"],"x":1.540549,"y":11.83381,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"AMZN","company_name":"Amazon.com Inc.","segment_name":"Streaming & Content","description":"Prime Video streaming, original content production, Twitch live streaming, and music streaming services","revenue_contribution":"5%","industry_tags":["streaming media","content production","entertainment"],"key_technologies":["video streaming","content delivery network","live streaming"],"customer_segments":["consumers","content creators"],"x":2.850953,"y":7.438596,"cluster_id":1,"cluster_name":"Digital Media & Advertising"},
+  {"company":"TSLA","company_name":"Tesla Inc.","segment_name":"Electric Vehicles","description":"Design, manufacture, and sale of fully electric vehicles including sedans, SUVs, and trucks with vertically integrated production","revenue_contribution":"82%","industry_tags":["electric vehicles","automotive manufacturing","consumer vehicles"],"key_technologies":["battery technology","electric drivetrain","gigacasting","vertically integrated manufacturing"],"customer_segments":["consumers","fleet operators"],"x":1.475977,"y":10.122102,"cluster_id":0,"cluster_name":"Advanced Manufacturing & Hardware"},
+  {"company":"TSLA","company_name":"Tesla Inc.","segment_name":"Energy Generation & Storage","description":"Solar panels, Solar Roof, Powerwall home batteries, Megapack utility-scale energy storage systems","revenue_contribution":"8%","industry_tags":["renewable energy","energy storage","solar power","grid infrastructure"],"key_technologies":["battery technology","solar cells","energy management software"],"customer_segments":["homeowners","utilities","commercial buildings"],"x":1.179174,"y":10.324337,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"TSLA","company_name":"Tesla Inc.","segment_name":"Autonomous Driving & AI","description":"Full Self-Driving software, autonomous vehicle AI training, Dojo supercomputer for neural network training, robotaxi development","revenue_contribution":"5%","industry_tags":["autonomous driving","AI infrastructure","robotics"],"key_technologies":["computer vision","neural networks","custom AI chips","simulation"],"customer_segments":["Tesla vehicle owners","future robotaxi riders"],"x":0.042845,"y":9.554794,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"TSLA","company_name":"Tesla Inc.","segment_name":"Optimus Robot","description":"Development of humanoid robots for manufacturing tasks and eventually consumer applications","revenue_contribution":"0%","industry_tags":["robotics","industrial automation","AI infrastructure"],"key_technologies":["humanoid robotics","computer vision","actuators","AI"],"customer_segments":["manufacturers","future consumers"],"x":0.320077,"y":9.684635,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"GOOG","company_name":"Alphabet Inc.","segment_name":"Search & Advertising","description":"Google Search, YouTube ads, Google Network advertising, and programmatic ad exchange platforms","revenue_contribution":"77%","industry_tags":["digital advertising","search engine","ad technology"],"key_technologies":["search algorithms","ad auction","machine learning","natural language processing"],"customer_segments":["advertisers","publishers","consumers"],"x":3.016435,"y":7.58437,"cluster_id":1,"cluster_name":"Digital Media & Advertising"},
+  {"company":"GOOG","company_name":"Alphabet Inc.","segment_name":"Google Cloud","description":"Cloud computing infrastructure, data analytics, AI/ML platform services, and enterprise collaboration tools (Workspace)","revenue_contribution":"12%","industry_tags":["cloud computing","AI infrastructure","enterprise software"],"key_technologies":["cloud infrastructure","BigQuery","Vertex AI","Kubernetes"],"customer_segments":["enterprises","developers","government"],"x":0.25529,"y":10.50816,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"GOOG","company_name":"Alphabet Inc.","segment_name":"Waymo Autonomous Vehicles","description":"Self-driving technology development and commercial robotaxi services in select US cities","revenue_contribution":"1%","industry_tags":["autonomous driving","robotics","mobility services"],"key_technologies":["LiDAR","computer vision","HD mapping","simulation"],"customer_segments":["ride-hailing passengers","logistics companies"],"x":-0.075369,"y":9.813129,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"GOOG","company_name":"Alphabet Inc.","segment_name":"AI Research & Models","description":"DeepMind and Google AI research, Gemini foundation models, AI integration across all Google products","revenue_contribution":"0%","industry_tags":["AI infrastructure","AI research","foundation models"],"key_technologies":["transformer models","reinforcement learning","multimodal AI"],"customer_segments":["internal Google products","developers via API","researchers"],"x":0.011061,"y":9.094028,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"MSFT","company_name":"Microsoft Corporation","segment_name":"Intelligent Cloud (Azure)","description":"Azure cloud platform, server products, enterprise cloud services, and AI infrastructure including OpenAI partnership","revenue_contribution":"44%","industry_tags":["cloud computing","AI infrastructure","enterprise software"],"key_technologies":["cloud infrastructure","Azure AI","OpenAI integration","hybrid cloud"],"customer_segments":["enterprises","developers","government"],"x":0.737258,"y":10.473547,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"MSFT","company_name":"Microsoft Corporation","segment_name":"Productivity & Business Processes","description":"Microsoft 365, LinkedIn, Dynamics 365 business applications, and Copilot AI assistant integration","revenue_contribution":"33%","industry_tags":["enterprise software","productivity tools","professional networking"],"key_technologies":["SaaS platform","AI copilot","CRM/ERP"],"customer_segments":["enterprises","professionals","small businesses"],"x":1.278724,"y":11.180517,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"MSFT","company_name":"Microsoft Corporation","segment_name":"Personal Computing","description":"Windows, Surface devices, Xbox gaming, and search advertising (Bing)","revenue_contribution":"23%","industry_tags":["operating systems","gaming hardware","consumer electronics","digital advertising"],"key_technologies":["Windows OS","Xbox hardware","search engine"],"customer_segments":["consumers","gamers","PC manufacturers"],"x":2.560352,"y":7.683706,"cluster_id":1,"cluster_name":"Digital Media & Advertising"},
+  {"company":"LMT","company_name":"Lockheed Martin Corporation","segment_name":"Aeronautics","description":"Design, manufacture, and sustainment of advanced military aircraft including F-35, F-16, and classified programs","revenue_contribution":"40%","industry_tags":["defense aerospace","military aircraft","government contracting"],"key_technologies":["stealth technology","avionics","advanced materials"],"customer_segments":["US Department of Defense","allied governments"],"x":-0.422898,"y":11.787339,"cluster_id":2,"cluster_name":"Defense & Government Systems"},
+  {"company":"LMT","company_name":"Lockheed Martin Corporation","segment_name":"Missiles & Fire Control","description":"Missile defense systems, precision strike weapons, fire control systems, and tactical missile programs","revenue_contribution":"18%","industry_tags":["defense weapons systems","missile defense","government contracting"],"key_technologies":["guided missiles","directed energy","fire control sensors"],"customer_segments":["US Department of Defense","allied governments"],"x":-0.47042,"y":11.353762,"cluster_id":2,"cluster_name":"Defense & Government Systems"},
+  {"company":"LMT","company_name":"Lockheed Martin Corporation","segment_name":"Rotary & Mission Systems","description":"Military helicopters, naval combat systems, radar, electronic warfare, and cybersecurity solutions","revenue_contribution":"25%","industry_tags":["defense electronics","naval defense","government contracting"],"key_technologies":["radar systems","electronic warfare","naval combat systems"],"customer_segments":["US Department of Defense","allied navies"],"x":-0.827388,"y":11.504195,"cluster_id":2,"cluster_name":"Defense & Government Systems"},
+  {"company":"LMT","company_name":"Lockheed Martin Corporation","segment_name":"Space","description":"Satellites, space launch systems, strategic missile systems, and space-based surveillance","revenue_contribution":"17%","industry_tags":["space systems","satellite technology","government contracting"],"key_technologies":["satellite systems","space launch","space surveillance"],"customer_segments":["US government","NASA","intelligence agencies"],"x":-0.780184,"y":11.699086,"cluster_id":2,"cluster_name":"Defense & Government Systems"},
+  {"company":"COST","company_name":"Costco Wholesale Corporation","segment_name":"Warehouse Retail","description":"Membership-based warehouse retail selling bulk consumer goods, groceries, electronics, and household items at discount prices","revenue_contribution":"87%","industry_tags":["retail","warehouse club","consumer goods"],"key_technologies":["inventory management","supply chain optimization"],"customer_segments":["consumers","small businesses"],"x":1.969417,"y":12.293765,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"COST","company_name":"Costco Wholesale Corporation","segment_name":"Membership Fees","description":"Annual membership fees providing access to warehouse locations and online shopping","revenue_contribution":"2%","industry_tags":["retail","subscription model"],"key_technologies":["membership management"],"customer_segments":["consumers","small businesses"],"x":1.838777,"y":12.129556,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"COST","company_name":"Costco Wholesale Corporation","segment_name":"E-Commerce & Ancillary","description":"Online retail, pharmacy, optical, travel services, and gasoline stations","revenue_contribution":"11%","industry_tags":["e-commerce","retail","pharmacy"],"key_technologies":["e-commerce platform"],"customer_segments":["consumers"],"x":2.309075,"y":12.021062,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"CRM","company_name":"Salesforce Inc.","segment_name":"Sales Cloud","description":"Cloud-based CRM platform for sales force automation, opportunity management, and revenue forecasting","revenue_contribution":"25%","industry_tags":["enterprise software","CRM","SaaS"],"key_technologies":["CRM platform","AI-powered analytics","SaaS"],"customer_segments":["enterprises","sales teams"],"x":0.875345,"y":11.338348,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"CRM","company_name":"Salesforce Inc.","segment_name":"Service Cloud","description":"Customer service and support platform including call center, chatbot, and field service management","revenue_contribution":"25%","industry_tags":["enterprise software","customer service","SaaS"],"key_technologies":["case management","AI chatbots","omnichannel support"],"customer_segments":["enterprises","support teams"],"x":1.590068,"y":11.319437,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"CRM","company_name":"Salesforce Inc.","segment_name":"Platform & Data Cloud","description":"Application development platform, data integration, analytics, and AI capabilities (Einstein) for building custom business applications","revenue_contribution":"25%","industry_tags":["enterprise software","data analytics","AI infrastructure","SaaS"],"key_technologies":["low-code platform","data integration","Einstein AI"],"customer_segments":["developers","data teams","enterprises"],"x":0.540681,"y":11.128565,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"CRM","company_name":"Salesforce Inc.","segment_name":"Marketing & Commerce Cloud","description":"Digital marketing automation, e-commerce storefronts, and customer journey management","revenue_contribution":"25%","industry_tags":["enterprise software","digital marketing","e-commerce","SaaS"],"key_technologies":["marketing automation","email marketing","commerce platform"],"customer_segments":["marketing teams","e-commerce businesses"],"x":2.013182,"y":11.300092,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"PLTR","company_name":"Palantir Technologies Inc.","segment_name":"Government (Gotham)","description":"Data integration and analytics platform for defense and intelligence agencies, enabling battlefield awareness and counter-terrorism operations","revenue_contribution":"42%","industry_tags":["defense analytics","intelligence systems","government contracting"],"key_technologies":["data integration","graph analytics","secure classified computing"],"customer_segments":["US Department of Defense","intelligence agencies","allied governments"],"x":0.194277,"y":11.715285,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"PLTR","company_name":"Palantir Technologies Inc.","segment_name":"Commercial (Foundry)","description":"Enterprise data operating system for supply chain optimization, manufacturing analytics, and business operations across industries","revenue_contribution":"40%","industry_tags":["enterprise software","industrial analytics","supply chain","SaaS"],"key_technologies":["data integration","ontology modeling","operational analytics"],"customer_segments":["manufacturers","healthcare providers","energy companies","financial institutions"],"x":0.943588,"y":11.839533,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"PLTR","company_name":"Palantir Technologies Inc.","segment_name":"AI Platform (AIP)","description":"LLM-powered decision support platform enabling non-technical users to deploy AI across operational workflows in both government and commercial settings","revenue_contribution":"18%","industry_tags":["AI infrastructure","enterprise software","defense analytics"],"key_technologies":["LLM integration","AI orchestration","secure AI deployment"],"customer_segments":["enterprises","government agencies","military operators"],"x":0.358002,"y":11.23315,"cluster_id":3,"cluster_name":"Commerce, Operations & Enterprise Platform"},
+  {"company":"META","company_name":"Meta Platforms Inc.","segment_name":"Family of Apps Advertising","description":"Advertising revenue from Facebook, Instagram, Messenger, and WhatsApp through targeted display, video, and story ads","revenue_contribution":"97%","industry_tags":["digital advertising","social media","ad technology"],"key_technologies":["ad targeting algorithms","recommendation systems","machine learning"],"customer_segments":["advertisers","small businesses","agencies"],"x":3.193729,"y":7.895619,"cluster_id":1,"cluster_name":"Digital Media & Advertising"},
+  {"company":"META","company_name":"Meta Platforms Inc.","segment_name":"Reality Labs (AR/VR)","description":"Virtual reality headsets (Quest), augmented reality research, metaverse platform development, and mixed reality devices","revenue_contribution":"2%","industry_tags":["virtual reality","augmented reality","consumer electronics","gaming hardware"],"key_technologies":["VR displays","hand tracking","spatial computing","AR glasses"],"customer_segments":["consumers","gamers","enterprise training"],"x":1.957434,"y":7.608171,"cluster_id":-1,"cluster_name":"Noise"},
+  {"company":"META","company_name":"Meta Platforms Inc.","segment_name":"AI Research & Infrastructure","description":"LLaMA open-source models, AI research, custom AI chips, and massive GPU infrastructure for training foundation models","revenue_contribution":"0%","industry_tags":["AI infrastructure","AI research","foundation models","data center hardware"],"key_technologies":["LLaMA models","custom silicon","large-scale GPU clusters"],"customer_segments":["internal products","open-source community","developers"],"x":0.29358,"y":8.904699,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"ASML","company_name":"ASML Holding N.V.","segment_name":"EUV Lithography Systems","description":"Extreme ultraviolet lithography machines enabling sub-7nm semiconductor manufacturing, sole supplier globally","revenue_contribution":"56%","industry_tags":["semiconductor equipment","advanced manufacturing","lithography"],"key_technologies":["EUV light source","precision optics","wafer stage positioning"],"customer_segments":["TSMC","Samsung","Intel","SK Hynix"],"x":2.263711,"y":9.646873,"cluster_id":0,"cluster_name":"Advanced Manufacturing & Hardware"},
+  {"company":"ASML","company_name":"ASML Holding N.V.","segment_name":"DUV Lithography Systems","description":"Deep ultraviolet lithography machines for mature and mid-range semiconductor nodes","revenue_contribution":"29%","industry_tags":["semiconductor equipment","advanced manufacturing","lithography"],"key_technologies":["ArF immersion lithography","precision optics"],"customer_segments":["semiconductor foundries","IDMs"],"x":2.024448,"y":9.393434,"cluster_id":0,"cluster_name":"Advanced Manufacturing & Hardware"},
+  {"company":"ASML","company_name":"ASML Holding N.V.","segment_name":"Installed Base Management","description":"Maintenance, upgrades, and refurbishment services for the global installed base of lithography systems","revenue_contribution":"15%","industry_tags":["semiconductor equipment","equipment services"],"key_technologies":["predictive maintenance","remote diagnostics"],"customer_segments":["existing lithography system owners"],"x":2.115901,"y":9.816258,"cluster_id":0,"cluster_name":"Advanced Manufacturing & Hardware"},
+  {"company":"AMD","company_name":"Advanced Micro Devices Inc.","segment_name":"Data Center","description":"EPYC server CPUs and Instinct AI accelerator GPUs for cloud and enterprise data centers","revenue_contribution":"50%","industry_tags":["AI infrastructure","cloud computing","data center hardware","high-performance computing"],"key_technologies":["x86 CPU","GPU compute","chiplet architecture","ROCm"],"customer_segments":["cloud hyperscalers","enterprise data centers","HPC users"],"x":0.942554,"y":8.64379,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"},
+  {"company":"AMD","company_name":"Advanced Micro Devices Inc.","segment_name":"Client (PC)","description":"Ryzen desktop and laptop processors for consumer and commercial PCs","revenue_contribution":"20%","industry_tags":["consumer electronics","PC hardware"],"key_technologies":["x86 CPU","APU","chiplet architecture"],"customer_segments":["PC manufacturers","consumers","gamers"],"x":1.41149,"y":8.3117,"cluster_id":4,"cluster_name":"Consumer Computing & Gaming"},
+  {"company":"AMD","company_name":"Advanced Micro Devices Inc.","segment_name":"Gaming","description":"Radeon discrete GPUs for PC gaming and semi-custom SoCs for game consoles (PlayStation, Xbox)","revenue_contribution":"15%","industry_tags":["gaming hardware","consumer electronics","semiconductor"],"key_technologies":["GPU","semi-custom SoC","RDNA architecture"],"customer_segments":["gamers","Sony","Microsoft"],"x":1.359239,"y":7.643148,"cluster_id":4,"cluster_name":"Consumer Computing & Gaming"},
+  {"company":"AMD","company_name":"Advanced Micro Devices Inc.","segment_name":"Embedded","description":"Adaptive computing products (FPGAs from Xilinx acquisition), embedded processors for industrial, automotive, and communications","revenue_contribution":"15%","industry_tags":["embedded systems","industrial automation","automotive electronics","telecommunications"],"key_technologies":["FPGA","adaptive SoC","edge computing"],"customer_segments":["automakers","telecom providers","industrial OEMs"],"x":1.189628,"y":9.151963,"cluster_id":5,"cluster_name":"AI Infrastructure & Cloud"}
+];
+
+const HUB_NODES = {
+  "NVDA":{"company_name":"NVIDIA Corporation","clusters_crossed":2,"cluster_ids":[4,5],"cluster_names":["Consumer Computing & Gaming","AI Infrastructure & Cloud"],"segments_total":4,"segments_non_noise":3,"convergence_centrality":1.5,"is_hub_node":true},
+  "AMZN":{"company_name":"Amazon.com Inc.","clusters_crossed":3,"cluster_ids":[1,3,5],"cluster_names":["Digital Media & Advertising","Commerce, Operations & Enterprise Platform","AI Infrastructure & Cloud"],"segments_total":5,"segments_non_noise":5,"convergence_centrality":3.0,"is_hub_node":true},
+  "TSLA":{"company_name":"Tesla Inc.","clusters_crossed":2,"cluster_ids":[0,5],"cluster_names":["Advanced Manufacturing & Hardware","AI Infrastructure & Cloud"],"segments_total":4,"segments_non_noise":4,"convergence_centrality":2.0,"is_hub_node":true},
+  "GOOG":{"company_name":"Alphabet Inc.","clusters_crossed":2,"cluster_ids":[1,5],"cluster_names":["Digital Media & Advertising","AI Infrastructure & Cloud"],"segments_total":4,"segments_non_noise":4,"convergence_centrality":2.0,"is_hub_node":true},
+  "MSFT":{"company_name":"Microsoft Corporation","clusters_crossed":3,"cluster_ids":[1,3,5],"cluster_names":["Digital Media & Advertising","Commerce, Operations & Enterprise Platform","AI Infrastructure & Cloud"],"segments_total":3,"segments_non_noise":3,"convergence_centrality":3.0,"is_hub_node":true},
+  "LMT":{"company_name":"Lockheed Martin Corporation","clusters_crossed":1,"cluster_ids":[2],"cluster_names":["Defense & Government Systems"],"segments_total":4,"segments_non_noise":4,"convergence_centrality":1.0,"is_hub_node":false},
+  "COST":{"company_name":"Costco Wholesale Corporation","clusters_crossed":1,"cluster_ids":[3],"cluster_names":["Commerce, Operations & Enterprise Platform"],"segments_total":3,"segments_non_noise":3,"convergence_centrality":1.0,"is_hub_node":false},
+  "CRM":{"company_name":"Salesforce Inc.","clusters_crossed":1,"cluster_ids":[3],"cluster_names":["Commerce, Operations & Enterprise Platform"],"segments_total":4,"segments_non_noise":4,"convergence_centrality":1.0,"is_hub_node":false},
+  "PLTR":{"company_name":"Palantir Technologies Inc.","clusters_crossed":1,"cluster_ids":[3],"cluster_names":["Commerce, Operations & Enterprise Platform"],"segments_total":3,"segments_non_noise":3,"convergence_centrality":1.0,"is_hub_node":false},
+  "META":{"company_name":"Meta Platforms Inc.","clusters_crossed":2,"cluster_ids":[1,5],"cluster_names":["Digital Media & Advertising","AI Infrastructure & Cloud"],"segments_total":3,"segments_non_noise":2,"convergence_centrality":1.333,"is_hub_node":true},
+  "ASML":{"company_name":"ASML Holding N.V.","clusters_crossed":1,"cluster_ids":[0],"cluster_names":["Advanced Manufacturing & Hardware"],"segments_total":3,"segments_non_noise":3,"convergence_centrality":1.0,"is_hub_node":false},
+  "AMD":{"company_name":"Advanced Micro Devices Inc.","clusters_crossed":2,"cluster_ids":[4,5],"cluster_names":["Consumer Computing & Gaming","AI Infrastructure & Cloud"],"segments_total":4,"segments_non_noise":4,"convergence_centrality":2.0,"is_hub_node":true}
+};
+
+// ── Cluster config ─────────────────────────────────────────────────────────
+const CLUSTER_CONFIG = {
+  "-1": { name: "Noise",                                    color: "#64748b" },
+   "0": { name: "Advanced Manufacturing & Hardware",        color: "#F59E0B" },
+   "1": { name: "Digital Media & Advertising",              color: "#06B6D4" },
+   "2": { name: "Defense & Government Systems",             color: "#F87171" },
+   "3": { name: "Commerce, Operations & Enterprise Platform",color: "#34D399" },
+   "4": { name: "Consumer Computing & Gaming",              color: "#A78BFA" },
+   "5": { name: "AI Infrastructure & Cloud",                color: "#60A5FA" },
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function clusterColor(id) {
+  return (CLUSTER_CONFIG[String(id)] || CLUSTER_CONFIG["-1"]).color;
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let selectedCompany = null;
+let hubOnlyMode = false;
+let selectedDot = null;
+
+// ── Sidebar: Hub rankings ──────────────────────────────────────────────────
+const ranked = Object.entries(HUB_NODES)
+  .sort((a,b) => b[1].convergence_centrality - a[1].convergence_centrality);
+const maxCC = ranked[0][1].convergence_centrality;
+
+const hubList = document.getElementById("hub-list");
+ranked.forEach(([ticker, info], i) => {
+  const item = document.createElement("div");
+  item.className = "hub-item";
+  item.dataset.ticker = ticker;
+
+  // primary color = first cluster
+  const primaryColor = info.cluster_ids.length > 0
+    ? clusterColor(info.cluster_ids[0]) : "#64748b";
+
+  const hubStar = info.is_hub_node ? "★ " : "";
+  const ccPct = (info.convergence_centrality / maxCC * 100).toFixed(0);
+
+  item.innerHTML = `
+    <span class="hub-rank">${i+1}</span>
+    <span class="hub-ticker" style="color:${primaryColor}">${hubStar}${ticker}</span>
+    <div class="hub-bar-wrap">
+      <div class="hub-bar-track">
+        <div class="hub-bar-fill" style="width:${ccPct}%;background:${primaryColor}"></div>
+      </div>
+      <div class="hub-meta">
+        <span>${info.cluster_ids.length} cluster${info.cluster_ids.length>1?'s':''}</span>
+        <span>${info.segments_total} segs</span>
+      </div>
+    </div>
+    <span class="hub-cc">${info.convergence_centrality}</span>
+  `;
+  item.addEventListener("click", () => toggleCompanyHighlight(ticker));
+  hubList.appendChild(item);
+});
+
+// ── Sidebar: Legend ────────────────────────────────────────────────────────
+const legend = document.getElementById("legend");
+Object.entries(CLUSTER_CONFIG).filter(([id]) => id !== "-1").forEach(([id, cfg]) => {
+  const item = document.createElement("div");
+  item.className = "legend-item";
+  item.innerHTML = `<div class="legend-dot" style="background:${cfg.color}"></div><span>${cfg.name}</span>`;
+  item.addEventListener("click", () => highlightCluster(parseInt(id)));
+  legend.appendChild(item);
+});
+// Add noise entry
+const noiseItem = document.createElement("div");
+noiseItem.className = "legend-item";
+noiseItem.innerHTML = `<div class="legend-dot" style="background:#64748b;opacity:.5"></div><span style="opacity:.5">Noise</span>`;
+legend.appendChild(noiseItem);
+
+// ── D3 Setup ───────────────────────────────────────────────────────────────
+const svg = d3.select("#chart-svg");
+const container = document.getElementById("main");
+
+function getSize() {
+  return { w: container.clientWidth, h: container.clientHeight };
+}
+
+const PAD = { top: 40, right: 50, bottom: 40, left: 50 };
+
+let xScale, yScale;
+
+function buildScales(w, h) {
+  const xs = SEGMENTS.map(d=>d.x), ys = SEGMENTS.map(d=>d.y);
+  const xPad = (d3.max(xs)-d3.min(xs)) * 0.12;
+  const yPad = (d3.max(ys)-d3.min(ys)) * 0.12;
+  xScale = d3.scaleLinear()
+    .domain([d3.min(xs)-xPad, d3.max(xs)+xPad])
+    .range([PAD.left, w-PAD.right]);
+  yScale = d3.scaleLinear()
+    .domain([d3.min(ys)-yPad, d3.max(ys)+yPad])
+    .range([h-PAD.bottom, PAD.top]);
+}
+
+// Groups in draw order
+let gHull, gLinks, gDots, gHighlightLinks, gLabels;
+
+function initSVG() {
+  svg.selectAll("*").remove();
+  const { w, h } = getSize();
+  svg.attr("width", w).attr("height", h);
+  buildScales(w, h);
+
+  const root = svg.append("g").attr("class","root");
+  gHull           = root.append("g").attr("class","hulls");
+  gLinks          = root.append("g").attr("class","links");
+  gDots           = root.append("g").attr("class","dots");
+  gHighlightLinks = root.append("g").attr("class","highlight-links");
+  gLabels         = root.append("g").attr("class","labels");
+
+  drawHulls();
+  drawLinks();
+  drawDots();
+  drawClusterLabels();
+}
+
+// ── Convex hull per cluster ────────────────────────────────────────────────
+function expandHull(pts, pad) {
+  if (pts.length < 2) return pts;
+  const cx = d3.mean(pts, p=>p[0]);
+  const cy = d3.mean(pts, p=>p[1]);
+  return pts.map(([x,y]) => {
+    const dx = x-cx, dy = y-cy;
+    const len = Math.sqrt(dx*dx+dy*dy) || 1;
+    return [x + dx/len*pad, y + dy/len*pad];
+  });
+}
+
+function drawHulls() {
+  const byCluster = d3.group(SEGMENTS.filter(d=>d.cluster_id!==-1), d=>d.cluster_id);
+
+  byCluster.forEach((segs, cid) => {
+    const pts = segs.map(d => [xScale(d.x), yScale(d.y)]);
+    if (pts.length < 2) return;
+
+    let hull;
+    if (pts.length === 2) {
+      // draw a rounded rect around the two pts
+      hull = [
+        [pts[0][0]-18, pts[0][1]-18],
+        [pts[0][0]+18, pts[0][1]-18],
+        [pts[1][0]+18, pts[1][1]+18],
+        [pts[1][0]-18, pts[1][1]+18],
+      ];
+    } else {
+      hull = d3.polygonHull(pts);
+    }
+    if (!hull) return;
+
+    const expanded = expandHull(hull, 30);
+    const color = clusterColor(cid);
+
+    gHull.append("path")
+      .datum(expanded)
+      .attr("class","cluster-hull")
+      .attr("data-cid", cid)
+      .attr("d", d => "M" + d.map(p=>p.join(",")).join("L") + "Z")
+      .attr("fill", color)
+      .attr("fill-opacity", 0.07)
+      .attr("stroke", color)
+      .attr("stroke-opacity", 0.25)
+      .attr("stroke-dasharray", "4,3")
+      .attr("rx", 12)
+      .style("filter", `drop-shadow(0 0 8px ${color}40)`);
+  });
+}
+
+// ── Company connector lines (hub spokes) ──────────────────────────────────
+function drawLinks() {
+  const byCompany = d3.group(SEGMENTS, d=>d.company);
+
+  byCompany.forEach((segs, company) => {
+    if (segs.length < 2) return;
+    const cx = d3.mean(segs, d=>xScale(d.x));
+    const cy = d3.mean(segs, d=>yScale(d.y));
+    const color = clusterColor(segs[0].cluster_id);
+    const isHub = HUB_NODES[company]?.is_hub_node;
+
+    segs.forEach(seg => {
+      gLinks.append("line")
+        .attr("class","company-link")
+        .attr("data-company", company)
+        .attr("x1", cx).attr("y1", cy)
+        .attr("x2", xScale(seg.x)).attr("y2", yScale(seg.y))
+        .attr("stroke", isHub ? "#818cf8" : "#475569")
+        .attr("stroke-opacity", isHub ? 0.5 : 0.3)
+        .attr("stroke-dasharray", isHub ? "5,4" : "3,4")
+        .attr("stroke-width", isHub ? 1.4 : 0.9);
+    });
+
+    // draw company centroid marker
+    gLinks.append("circle")
+      .attr("class","company-centroid")
+      .attr("data-company", company)
+      .attr("cx", cx).attr("cy", cy)
+      .attr("r", isHub ? 4 : 2.5)
+      .attr("fill", isHub ? "#818cf8" : "#475569")
+      .attr("fill-opacity", isHub ? 0.8 : 0.4)
+      .attr("pointer-events","none");
+  });
+}
+
+// ── Dots ──────────────────────────────────────────────────────────────────
+const tooltip = document.getElementById("tooltip");
+
+function dotRadius(d) {
+  const info = HUB_NODES[d.company];
+  const base = info?.is_hub_node ? 8 : 6;
+  // scale slightly by revenue if parseable
+  const rev = parseFloat(d.revenue_contribution) || 0;
+  return base + Math.sqrt(rev) * 0.3;
+}
+
+function drawDots() {
+  gDots.selectAll(".segment-dot")
+    .data(SEGMENTS)
+    .join("circle")
+    .attr("class","segment-dot")
+    .attr("data-company", d=>d.company)
+    .attr("data-cluster", d=>d.cluster_id)
+    .attr("cx", d=>xScale(d.x))
+    .attr("cy", d=>yScale(d.y))
+    .attr("r", d=>dotRadius(d))
+    .attr("fill", d=>clusterColor(d.cluster_id))
+    .attr("fill-opacity", d=>d.cluster_id===-1 ? 0.35 : 0.85)
+    .attr("stroke", d=>d.cluster_id===-1 ? "#475569" : "#0a0a1a")
+    .attr("stroke-width", 1.5)
+    .on("mouseover", onDotHover)
+    .on("mousemove", onDotMove)
+    .on("mouseout", onDotOut)
+    .on("click", onDotClick);
+}
+
+// ── Cluster labels ────────────────────────────────────────────────────────
+function drawClusterLabels() {
+  const byCluster = d3.group(SEGMENTS.filter(d=>d.cluster_id!==-1), d=>d.cluster_id);
+
+  byCluster.forEach((segs, cid) => {
+    // place label at the top-most point of the cluster
+    const topSeg = segs.reduce((best, d) =>
+      yScale(d.y) < yScale(best.y) ? d : best, segs[0]);
+    const cx = d3.mean(segs, d=>xScale(d.x));
+    const ty = yScale(topSeg.y) - 22;
+
+    const name = CLUSTER_CONFIG[String(cid)]?.name || `Cluster ${cid}`;
+    const color = clusterColor(cid);
+    const shortName = name.replace("Commerce, Operations & ", "Ops & ");
+
+    gLabels.append("text")
+      .attr("class","cluster-label")
+      .attr("x", cx)
+      .attr("y", ty)
+      .attr("fill", color)
+      .attr("opacity", 0.8)
+      .style("font-size","11px")
+      .style("font-weight","700")
+      .style("letter-spacing",".04em")
+      .style("text-shadow","0 0 8px rgba(0,0,0,.9)")
+      .text(shortName);
+  });
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────
+function onDotHover(event, d) {
+  const color = clusterColor(d.cluster_id);
+  tooltip.innerHTML = `
+    <div class="tt-company">${d.company} — ${d.company_name}</div>
+    <div class="tt-segment">${d.segment_name}</div>
+    <div class="tt-cluster">
+      <span style="background:${color}22;color:${color};border:1px solid ${color}44">
+        ${d.cluster_name}
+      </span>
+    </div>
+    <div class="tt-rev">Revenue: <strong>${d.revenue_contribution}</strong></div>
+  `;
+  tooltip.style.opacity = "1";
+  positionTooltip(event);
+}
+function onDotMove(event) { positionTooltip(event); }
+function onDotOut() { tooltip.style.opacity = "0"; }
+function positionTooltip(event) {
+  const { clientX: x, clientY: y } = event;
+  const { innerWidth: W, innerHeight: H } = window;
+  const ttW = 220, ttH = 100;
+  tooltip.style.left = (x + 14 + ttW > W ? x - ttW - 10 : x + 14) + "px";
+  tooltip.style.top  = (y + ttH > H ? y - ttH : y + 10) + "px";
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────
+const detailPanel = document.getElementById("detail-panel");
+const detailContent = document.getElementById("detail-content");
+document.getElementById("detail-close").addEventListener("click", () => {
+  detailPanel.classList.remove("open");
+  selectedDot = null;
+  resetHighlight();
+});
+
+function onDotClick(event, d) {
+  event.stopPropagation();
+  selectedDot = d;
+  const color = clusterColor(d.cluster_id);
+  const hubInfo = HUB_NODES[d.company];
+
+  detailContent.innerHTML = `
+    <div class="dp-company">${d.company} · ${d.company_name}</div>
+    <div class="dp-segment">${d.segment_name}</div>
+    <div>
+      <span class="dp-cluster-badge" style="background:${color}">
+        ${d.cluster_name}
+      </span>
+    </div>
+    <div class="dp-rev">Revenue Contribution: <strong>${d.revenue_contribution}</strong></div>
+    <hr class="dp-divider">
+    <div class="dp-section">Description</div>
+    <div class="dp-desc">${d.description}</div>
+    <div class="dp-section">Industry Tags</div>
+    <div class="dp-tags">${d.industry_tags.map(t=>`<span class="dp-tag">${t}</span>`).join("")}</div>
+    <div class="dp-section">Key Technologies</div>
+    <div class="dp-tags">${d.key_technologies.map(t=>`<span class="dp-tag" style="border-color:#6366f144;color:#818cf8">${t}</span>`).join("")}</div>
+    <div class="dp-section">Customer Segments</div>
+    <div class="dp-tags">${d.customer_segments.map(t=>`<span class="dp-tag" style="border-color:#06b6d444;color:#67e8f9">${t}</span>`).join("")}</div>
+    <hr class="dp-divider">
+    <div class="dp-section">Company Hub Status</div>
+    <div style="font-size:13px;color:var(--text-dim);line-height:1.7">
+      ${hubInfo.is_hub_node
+        ? `<span style="color:#fbbf24">★ Hub Node</span> — spans <strong style="color:var(--text)">${hubInfo.clusters_crossed} clusters</strong>`
+        : `Single-cluster company`
+      }<br>
+      Convergence Centrality: <strong style="color:var(--accent2)">${hubInfo.convergence_centrality}</strong><br>
+      <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+        ${hubInfo.cluster_names.map((n,i) => {
+          const c = clusterColor(hubInfo.cluster_ids[i]);
+          return `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${c}22;color:${c};border:1px solid ${c}44">${n}</span>`;
+        }).join("")}
+      </div>
+    </div>
+  `;
+  detailPanel.classList.add("open");
+  highlightCompany(d.company);
+}
+
+svg.on("click", () => {
+  resetHighlight();
+  detailPanel.classList.remove("open");
+  selectedDot = null;
+});
+
+// ── Highlight logic ───────────────────────────────────────────────────────
+function highlightCompany(ticker) {
+  selectedCompany = ticker;
+
+  // Sidebar selection
+  document.querySelectorAll(".hub-item").forEach(el => {
+    el.classList.toggle("selected", el.dataset.ticker === ticker);
+  });
+
+  const compSegs = SEGMENTS.filter(d => d.company === ticker);
+
+  // 1. Enlarge + bright border on this company's dots; fade others to 0.12
+  gDots.selectAll(".segment-dot")
+    .attr("fill-opacity", d => d.company === ticker ? 1 : 0.12)
+    .attr("r",            d => d.company === ticker ? dotRadius(d) + 4 : dotRadius(d))
+    .attr("stroke",       d => d.company === ticker ? "#ffffff" : "#0a0a1a")
+    .attr("stroke-width", d => d.company === ticker ? 2.5 : 1);
+
+  // 2. Dim permanent centroid spokes; keep this company's visible but subtle
+  gLinks.selectAll("[data-company]")
+    .attr("opacity", function() {
+      return this.getAttribute("data-company") === ticker ? 0.25 : 0.04;
+    });
+
+  // 3. Hulls: dim all, brighten this company's clusters
+  const companyClusters = new Set(
+    compSegs.filter(d => d.cluster_id !== -1).map(d => d.cluster_id)
+  );
+  gHull.selectAll(".cluster-hull")
+    .attr("fill-opacity",   function() { return companyClusters.has(+this.dataset.cid) ? 0.13 : 0.025; })
+    .attr("stroke-opacity", function() { return companyClusters.has(+this.dataset.cid) ? 0.45 : 0.05; });
+
+  // 4. Draw white dashed lines between every pair of this company's segments
+  gHighlightLinks.selectAll("*").remove();
+  for (let i = 0; i < compSegs.length; i++) {
+    for (let j = i + 1; j < compSegs.length; j++) {
+      const a = compSegs[i], b = compSegs[j];
+      gHighlightLinks.append("line")
+        .attr("x1", xScale(a.x)).attr("y1", yScale(a.y))
+        .attr("x2", xScale(b.x)).attr("y2", yScale(b.y))
+        .attr("stroke", "#ffffff")
+        .attr("stroke-width", 1.6)
+        .attr("stroke-dasharray", "6,4")
+        .attr("stroke-opacity", 0.65)
+        .style("filter", "drop-shadow(0 0 3px rgba(255,255,255,0.4))");
+    }
+  }
+
+  // 5. Company label above centroid
+  gLabels.selectAll(".company-hl-label").remove();
+  const cx = d3.mean(compSegs, d => xScale(d.x));
+  const cy = d3.mean(compSegs, d => yScale(d.y)) - 14;
+  gLabels.append("text")
+    .attr("class", "company-hl-label company-label")
+    .attr("x", cx).attr("y", cy)
+    .text(`◉ ${ticker}`)
+    .style("font-size", "13px")
+    .style("fill", "#fff")
+    .style("text-anchor", "middle")
+    .style("filter", "drop-shadow(0 0 5px rgba(0,0,0,1))");
+}
+
+function resetHighlight() {
+  selectedCompany = null;
+
+  document.querySelectorAll(".hub-item").forEach(el => el.classList.remove("selected"));
+
+  gDots.selectAll(".segment-dot")
+    .attr("fill-opacity", d => d.cluster_id === -1 ? 0.35 : 0.85)
+    .attr("r",            d => dotRadius(d))
+    .attr("stroke-width", 1.5)
+    .attr("stroke",       d => d.cluster_id === -1 ? "#475569" : "#0a0a1a");
+
+  gLinks.selectAll("[data-company]").attr("opacity", 1);
+
+  gHighlightLinks.selectAll("*").remove();
+
+  gHull.selectAll(".cluster-hull")
+    .attr("fill-opacity", 0.07)
+    .attr("stroke-opacity", 0.25);
+
+  gLabels.selectAll(".company-hl-label").remove();
+}
+
+function toggleCompanyHighlight(ticker) {
+  if (selectedCompany === ticker) {
+    resetHighlight();
+    detailPanel.classList.remove("open");
+  } else {
+    highlightCompany(ticker);
+  }
+}
+
+function highlightCluster(cid) {
+  resetHighlight();
+  gDots.selectAll(".segment-dot")
+    .attr("fill-opacity", d => d.cluster_id === cid ? 1 : 0.1)
+    .attr("stroke-width", d => d.cluster_id === cid ? 2.5 : 1)
+    .attr("stroke",       d => d.cluster_id === cid ? "#ffffff" : "#0a0a1a");
+  gLinks.selectAll("[data-company]").attr("opacity", 0.06);
+  gHull.selectAll(".cluster-hull")
+    .attr("fill-opacity",   function() { return +this.dataset.cid === cid ? 0.14 : 0.03; })
+    .attr("stroke-opacity", function() { return +this.dataset.cid === cid ? 0.5  : 0.06; });
+  selectedCompany = `__cluster_${cid}__`;
+}
+
+// ── Hub-only filter ────────────────────────────────────────────────────────
+const toggleBtn = document.getElementById("toggle-hub");
+toggleBtn.addEventListener("click", () => {
+  hubOnlyMode = !hubOnlyMode;
+  toggleBtn.classList.toggle("active", hubOnlyMode);
+
+  const hubTickers = new Set(
+    Object.entries(HUB_NODES).filter(([,v])=>v.is_hub_node).map(([k])=>k)
+  );
+
+  gDots.selectAll(".segment-dot")
+    .transition().duration(300)
+    .attr("opacity", d => !hubOnlyMode || hubTickers.has(d.company) ? 1 : 0.08);
+
+  gLinks.selectAll("[data-company]")
+    .transition().duration(300)
+    .attr("opacity", function() {
+      const c = this.getAttribute("data-company");
+      return !hubOnlyMode || hubTickers.has(c) ? 1 : 0.06;
+    });
+});
+
+// ── Resize ─────────────────────────────────────────────────────────────────
+const ro = new ResizeObserver(() => initSVG());
+ro.observe(container);
+
+// ── Init ───────────────────────────────────────────────────────────────────
+initSVG();
+</script>
+</body>
+</html>
